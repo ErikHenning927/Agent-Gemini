@@ -1,9 +1,11 @@
 import os
 from dotenv import load_dotenv
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.messages import SystemMessage, HumanMessage
 from pydantic import BaseModel, Field
 from typing  import Literal, List, Dict
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.messages import SystemMessage, HumanMessage
+from load_documents import *
+from utils import *
 load_dotenv()
 
 
@@ -56,5 +58,62 @@ testes = [
     'Quantas capiravas tem no parque barigui',
 ]
 
+# for msg_teste in testes:
+#     print(f"Pergunta: {msg_teste}\n -> Resposta: {triagem(msg_teste)}\n")
+
+
+chunks = load_docs()
+embeddings = GoogleGenerativeAIEmbeddings(
+    model="models/gemini-embedding-001",
+    google_api_key=gemini_key
+)
+
+
+vectorstore = FAISS.from_documents(chunks, embeddings)
+retriever = vectorstore.as_retriever(
+                                search_type="similarity_score_threshold", 
+                                search_kwargs={"score_threshold": 0.3, "k": 4}
+                            )
+
+prompt_rag = ChatPromptTemplate.from_messages([
+    ("system",
+     "Você é um Assistente de Políticas Internas (RH/IT) da empresa Carraro Desenvolvimento. "
+     "Responda SOMENTE com base no contexto fornecido. "
+     "Se não houver base suficiente, responda apenas 'Não sei'."),
+
+    ("human", "Pergunta: {input}\n\nContexto:\n{context}")
+])
+
+document_chain = create_stuff_documents_chain(llm_triagem, prompt_rag)
+
+
+def perguntar_politica_rag(pergunta: str) -> Dict:
+    docs_relacionados = retriever.invoke(pergunta)
+    if not docs_relacionados:
+        return {"answer": "Não Sei.",
+                "citacoes": [],
+                "contexto_encontrado": False}
+    
+    answer = document_chain.invoke({"input": pergunta,
+                                    "context": docs_relacionados})
+    
+    txt = (answer or "").strip()
+    if txt.rstrip(".!?") == "Não sei":
+        return {"answer": "Não Sei.",
+                "citacoes": [],
+                "contexto_encontrado": False}
+    return {"answer": txt,
+                "citacoes": formatar_citacoes(docs_relacionados, pergunta),
+                "contexto_encontrado": True}
+
+
 for msg_teste in testes:
-    print(f"Pergunta: {msg_teste}\n -> Resposta: {triagem(msg_teste)}\n")
+    resposta = perguntar_politica_rag(msg_teste)
+    print(f"PERGUNTA: {msg_teste}")
+    print(f"RESPOSTA: {resposta['answer']}")
+    if resposta['contexto_encontrado']:
+        print("CITAÇÕES:")
+        for c in resposta['citacoes']:
+            print(f" - Documento: {c['documento']}, Página: {c['pagina']}")
+            print(f"   Trecho: {c['trecho']}")
+        print("------------------------------------")
