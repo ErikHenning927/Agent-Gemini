@@ -30,5 +30,5 @@ workflow.add_edge("abrir_chamado", END)
 
 grafo = workflow.compile()
 graph_bytes = grafo.get_graph().draw_mermaid_png()
-with open("grafo.png", "wb") as f:
+with open("Agent/grafo.png", "wb") as f:
     f.write(graph_bytes)
